@@ -29,7 +29,7 @@ SPECIFIC_RESPONSES = {
 }
 
 # --- 2. 界面样式定制 ---
-st.set_page_config(page_title="安全科普语音系统", layout="centered")
+st.set_page_config(page_title="AI语音交互系统", layout="centered")
 
 st.markdown("""
     <style>
@@ -50,7 +50,7 @@ st.markdown("""
     /* 隐藏 HTML 默认播放器 */
     audio { display: none; }
     </style>
-    <div class="fixed-header">安全知识交互评估系统</div>
+    <div class="fixed-header">AI语音交互系统</div>
     """, unsafe_allow_html=True)
 
 
