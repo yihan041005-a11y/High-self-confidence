@@ -41,6 +41,7 @@ if "page" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+
 # ── 读取 Banner 图片 ──────────────────────────────────────
 def get_img_base64(path: str) -> str:
     try:
@@ -48,6 +49,7 @@ def get_img_base64(path: str) -> str:
             return base64.b64encode(f.read()).decode()
     except:
         return ""
+
 
 BANNER_B64 = get_img_base64("banner.png")
 BANNER_SRC = f"data:image/png;base64,{BANNER_B64}" if BANNER_B64 else ""
@@ -103,19 +105,13 @@ header[data-testid="stHeader"] {{ display: none !important; }}
 .bubble-ai {{ color: #c0d8ff; font-size: 14px; line-height: 1.7; }}
 audio {{ width: 100%; max-width: 260px; height: 34px; margin-top: 8px; filter: invert(0.85) hue-rotate(195deg); }}
 
-/* 锁定底部控制器 (对所有页面生效) */
-div[data-testid="stHorizontalBlock"], .fixed-footer-btn {{
+/* 锁定底部控制器 */
+div[data-testid="stHorizontalBlock"] {{
     position: fixed; bottom: 0; left: 0; width: 100%; 
     height: 105px; padding: 10px 14px 28px 14px;
     background: rgba(5,12,28,0.98); z-index: 1000;
     border-top: 0.5px solid rgba(60,120,255,0.2);
     display: flex; align-items: center; gap: 10px;
-}}
-
-/* 统一普通按钮样式 */
-.stButton > button[kind="secondary"] {{
-    background: rgba(25,65,200,0.85) !important; color: #ffffff !important;
-    border-radius: 9px !important; height: 42px !important; font-size: 14px !important;
 }}
 
 /* 优化手机端下拉框文字排版 */
@@ -130,16 +126,15 @@ button[kind="primary"] {{
 }}
 
 /* ======================================================== */
-/* 兼容所有浏览器的返回按钮锁定方案 (利用 tooltip 容器) */
+/* 暴击修复 1：兼容所有手机的返回键（左上角）方案           */
+/* 原理：将所有普通按钮飞到左上角，再把底部栏里的按钮盖回来 */
 /* ======================================================== */
-div[data-testid="stTooltipHoverTarget"] {{
+button[kind="secondary"] {{
     position: fixed !important;
     top: 8px !important;
     left: 12px !important;
     z-index: 1001 !important;
     width: auto !important;
-}}
-div[data-testid="stTooltipHoverTarget"] button {{
     height: 38px !important;
     padding: 0 14px !important;
     font-size: 13px !important;
@@ -148,17 +143,50 @@ div[data-testid="stTooltipHoverTarget"] button {{
     border: 1px solid rgba(80,140,255,0.3) !important;
     color: #ffffff !important;
     font-weight: 500 !important;
-    margin: 0 !important;
 }}
-div[data-testid="stTooltipHoverTarget"] button:hover {{
-    background: rgba(40,80,180,0.8) !important;
+/* 把被误伤的底部栏“发送/下一页”按钮恢复原样 */
+div[data-testid="stHorizontalBlock"] button[kind="secondary"] {{
+    position: relative !important;
+    top: auto !important; left: auto !important;
+    width: 100% !important;
+    height: 42px !important;
+    font-size: 14px !important;
+    border-radius: 9px !important;
+    background: rgba(25,65,200,0.85) !important;
+    border: none !important;
+}}
+
+/* ======================================================== */
+/* 暴击修复 2：彻底解决下拉框选项重叠（乱码）问题           */
+/* 原理：强行干掉 React-Window 的绝对定位，改为普通列表堆叠 */
+/* ======================================================== */
+div[data-baseweb="popover"] {{
+    z-index: 99999 !important;
+}}
+ul[data-baseweb="menu"] {{
+    display: block !important;
+    height: auto !important;
+    max-height: 280px !important;
+    overflow-y: auto !important;
+}}
+ul[data-baseweb="menu"] li {{
+    position: relative !important;
+    transform: none !important;
+    top: auto !important;
+    left: auto !important;
+    height: auto !important;
+    min-height: 40px !important;
+    padding: 14px 16px !important;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    line-height: 1.4 !important;
+    white-space: normal !important;
 }}
 </style>
 """, unsafe_allow_html=True)
 
 # ── 顶栏 & Banner 渲染 ────────────────────────────────────
 banner_img = f'<img src="{BANNER_SRC}"/>' if BANNER_SRC else ''
-header_shift = "80px" if st.session_state.page == 2 else "0px" # 给返回按钮留出位置
+header_shift = "80px" if st.session_state.page == 2 else "0px"  # 给返回按钮留出位置
 
 st.markdown(f"""
 <div class="fixed-header">
@@ -216,15 +244,13 @@ if st.session_state.page == 1:
 elif st.session_state.page == 2:
 
     # ========================================================
-    # 左上角返回按钮 (通过 help 属性触发 tooltip 容器实现绝对定位)
+    # 左上角返回按钮（直接调用，CSS 会自动把它拉到左上角）
     # ========================================================
-    if st.button("⬅ 返回", help="返回上一页", key="back_btn"):
+    if st.button("⬅ 返回", key="back_btn"):
         st.session_state.page = 1
         st.rerun()
 
-    # ========================================================
-    # 右上角完成按钮 (被 CSS type="primary" 精准锁定)
-    # ========================================================
+    # 右上角完成按钮
     if st.button("完成", type="primary", key="finish_btn"):
         st.session_state.page = 3
         st.rerun()
@@ -253,7 +279,7 @@ elif st.session_state.page == 2:
     # 底部对话控制器
     options = ["请点击选择一个问题进行咨询..."] + list(SHORT_TO_LONG.keys())
     col_sel, col_btn = st.columns([3.5, 1], gap="small")
-    
+
     with col_sel:
         selected_short = st.selectbox("Q", options, label_visibility="collapsed")
     with col_btn:
@@ -262,16 +288,16 @@ elif st.session_state.page == 2:
     if send_trigger and selected_short != "请点击选择一个问题进行咨询...":
         long_question = SHORT_TO_LONG[selected_short]
         st.session_state.messages.append({"role": "user", "content": long_question})
-        
+
         answer = SPECIFIC_RESPONSES[long_question]
         audio_path = AUDIO_MAPPING[long_question]
-        
+
         try:
             with st.spinner("读取语音中..."):
-                time.sleep(1) # 添加稍微的停顿，保持原有的交互节奏
+                time.sleep(1)  # 添加稍微的停顿，保持原有的交互节奏
                 with open(audio_path, "rb") as f:
                     audio_bytes = f.read()
-                
+
                 st.session_state.messages.append({
                     "role": "assistant", "content": answer, "audio": audio_bytes
                 })
