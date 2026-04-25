@@ -1,22 +1,22 @@
 import streamlit as st
-from elevenlabs.client import ElevenLabs
-from elevenlabs import VoiceSettings
 import base64
+import os
+import time
 
 # ========================================================
-# 实验员控制台 - 安全问答 & 语音条播放版
+# 实验员控制台 - 语音条播放版 (本地文件映射)
 # ========================================================
-VOICE_ID = "MpFj36VyP4TvI7fd8mQA"
-MODEL_ID = "eleven_v3"  # 使用最新的 V3 级别模型
-STABILITY_VAL = 0.85
 
-# API 配置
-DEEPSEEK_API_KEY = "sk-46f5736e30f544288284d6b7d7641393"
-ELEVENLABS_API_KEY = "sk_57e57c67990c2b1a1a5b44c018cf81b0564cc1cc777b7de8"
+# --- 1. 映射配置 ---
+AUDIO_MAPPING = {
+    "如果手指不小心被生锈的铁钉扎深了，只需要涂点红药水就行吗？":
+        r"audio/ElevenLabs_2026-04-25T02_40_26_高自信声音_破伤风5_v3.mp3",
+    "家里煤气灶漏气了，我应该立刻打开抽油烟机把煤气抽走吗？":
+        r"audio/ElevenLabs_2026-04-25T02_43_42_高自信声音_煤气_v3.mp3",
+    "我可以用微波炉加热金属碗或者未剥壳的鸡蛋吗？":
+        r"audio/ElevenLabs_2026-04-25T02_46_13_高自信声音_微波炉_v3.mp3"
+}
 
-client_el = ElevenLabs(api_key=ELEVENLABS_API_KEY)
-
-# --- 1. 特定问题与答案映射 ---
 SPECIFIC_RESPONSES = {
     "如果手指不小心被生锈的铁钉扎深了，只需要涂点红药水就行吗？":
         "绝对不行。深层伤口极易形成缺氧环境，是破伤风梭菌滋生的温室。红药水仅能处理表皮擦伤，无法渗透深层组织。您应当立即去医院进行清创，并根据医嘱注射破伤风抗毒素或破伤风疫苗。任何对深层生锈伤口的疏忽都可能导致严重的神经系统并发症甚至危及生命。",
@@ -28,24 +28,31 @@ SPECIFIC_RESPONSES = {
         "绝对不可以。微波无法穿透金属，会在金属表面产生电反射并激发出电火花，可能损坏微波炉甚至引起火灾。而未剥壳的鸡蛋在微波加热时，内部水分瞬间汽化产生高压，由于蛋壳限制无法释放，会导致鸡蛋在炉内或取出时发生剧烈爆炸。为了您的安全，严禁进行此类操作。"
 }
 
+# ── Session State ──────────────────────────────────────────
+if "page" not in st.session_state:
+    st.session_state.page = 1
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+
 # ── 读取 Banner 图片 ──────────────────────────────────────
 def get_img_base64(path: str) -> str:
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode()
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except:
+        return ""
 
-try:
-    BANNER_B64 = get_img_base64("banner.png")
-    BANNER_SRC = f"data:image/png;base64,{BANNER_B64}"
-except:
-    BANNER_SRC = ""
+
+BANNER_B64 = get_img_base64("banner.png")
+BANNER_SRC = f"data:image/png;base64,{BANNER_B64}" if BANNER_B64 else ""
 
 # ── 页面配置 ──────────────────────────────────────────────
 st.set_page_config(page_title="AI语音交互系统", layout="centered", initial_sidebar_state="collapsed")
 
-# ── 核心 CSS：严格锁定视口与高度 ────────────────────────
+# ── 核心 CSS ──────────────────────────────────────────────
 st.markdown(f"""
 <style>
-/* 1. 强制锁死页面整体滚动，启用手机动态视口 100dvh */
 html, body, [data-testid="stAppViewContainer"], .main {{
     height: 100dvh !important;
     width: 100vw !important;
@@ -56,12 +63,10 @@ html, body, [data-testid="stAppViewContainer"], .main {{
     font-family: -apple-system, 'PingFang SC', sans-serif;
 }}
 
-/* 隐藏 Streamlit 默认头部和所有内边距 */
 header[data-testid="stHeader"] {{ display: none !important; }}
 .block-container {{ padding: 0 !important; max-width: 100% !important; }}
-[data-testid="stChatMessage"] {{ display: none !important; }}
 
-/* ── 背景网格 ── */
+/* 背景网格 */
 .stApp::after {{
     content: "";
     position: fixed; inset: 0; z-index: 0; pointer-events: none;
@@ -71,33 +76,22 @@ header[data-testid="stHeader"] {{ display: none !important; }}
     background-size: 50px 50px;
 }}
 
-/* ================== 四大模块固定布局 ================== */
-
-/* 1. 固定顶栏 (Top Bar) */
+/* 1. 固定顶栏 */
 .fixed-header {{
     position: fixed; top: 0; left: 0; width: 100%; height: 54px;
-    background: rgba(5,13,26,0.95);
-    backdrop-filter: blur(14px);
+    background: rgba(5,13,26,0.95); backdrop-filter: blur(14px);
     border-bottom: 0.5px solid rgba(60,120,255,0.15);
-    display: flex; align-items: center; gap: 10px; padding: 0 16px;
+    display: flex; align-items: center; justify-content: space-between; padding: 0 16px;
     z-index: 1000;
 }}
-.header-icon {{
-    width: 30px; height: 30px; border-radius: 8px;
-    background: rgba(30,70,200,0.25); border: 0.5px solid rgba(80,140,255,0.3);
-    display: flex; align-items: center; justify-content: center; font-size: 14px;
-}}
 .header-title {{ font-size: 14px; font-weight: 500; color: #c8deff; }}
-.header-sub {{ font-size: 10px; color: rgba(120,170,255,0.45); margin-top: 1px; }}
 
-/* 2. 固定 Banner (紧接顶栏下方) */
+/* 2. 固定 Banner */
 .banner-wrap {{
     position: fixed; top: 54px; left: 0; width: 100%; height: 160px;
     z-index: 900; background: #0a1428; overflow: hidden;
 }}
-.banner-wrap img {{
-    width: 100%; height: 100%; object-fit: cover; object-position: center 30%;
-}}
+.banner-wrap img {{ width: 100%; height: 100%; object-fit: cover; object-position: center 30%; }}
 .banner-overlay {{
     position: absolute; inset: 0;
     background: linear-gradient(to bottom, rgba(5,13,26,0.1) 0%, rgba(5,13,26,0.7) 100%);
@@ -107,171 +101,243 @@ header[data-testid="stHeader"] {{ display: none !important; }}
     font-size: 11px; color: rgba(180,210,255,0.7); letter-spacing: 1px;
 }}
 
-/* 3. 中间对话滚动窗口 (自动填满中间区域，仅内部滚动) */
-.chat-scroll-wrap {{
-    position: fixed; 
-    top: 214px; 
-    bottom: 105px; /* 【修改点】预留更多底部空间给增高的发送栏 */
-    left: 0; width: 100%;
+/* 3. 中间滚动窗口 */
+.scroll-wrap {{
+    position: fixed; top: 214px; bottom: 105px; left: 0; width: 100%;
     overflow-y: auto; overflow-x: hidden;
-    padding: 16px 14px; z-index: 800;
-    display: flex; flex-direction: column; gap: 14px;
+    padding: 16px 18px; z-index: 800;
     scrollbar-width: none; 
 }}
-.chat-scroll-wrap::-webkit-scrollbar {{ display: none; }}
+.scroll-wrap::-webkit-scrollbar {{ display: none; }}
 
-/* 4. 固定底部控制器 (拦截Streamlit布局，直接固定在底部) */
-div[data-testid="stHorizontalBlock"] {{
+/* 4. 固定底部控制器 */
+div[data-testid="stHorizontalBlock"], .fixed-footer-btn {{
     position: fixed; bottom: 0; left: 0; width: 100%; 
-    height: 105px; /* 【修改点】增加整体高度 */
-    padding: 10px 14px 28px 14px; /* 【修改点】增加底部Padding(28px)，把控件往上顶，避开手机底部黑条 */
+    height: 105px; padding: 10px 14px 28px 14px;
     background: rgba(5,12,28,0.98); z-index: 1000;
     border-top: 0.5px solid rgba(60,120,255,0.2);
     display: flex; align-items: center; gap: 10px;
 }}
 
-/* ── 样式细节定制 ── */
-.bubble-user-wrap {{ display: flex; justify-content: flex-end; }}
+/* 样式细节 */
+.instruction-text {{ color: #c0d8ff; font-size: 14px; line-height: 1.7; }}
+.instruction-text b {{ color: #ffffff; }}
+.highlight-blue {{ color: #4dabff; font-weight: bold; }}
+
+.bubble-user-wrap {{ display: flex; justify-content: flex-end; margin-bottom: 14px; }}
 .bubble-user {{
     background: rgba(30,65,190,0.80); color: #d8e8ff;
     border-radius: 18px 18px 4px 18px; padding: 11px 15px;
-    max-width: 82%; font-size: 14px; line-height: 1.6;
+    max-width: 82%; font-size: 14px;
 }}
-.bubble-ai-wrap {{ display: flex; align-items: flex-start; gap: 10px; }}
+.bubble-ai-wrap {{ display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; }}
 .ai-dot {{
     width: 28px; height: 28px; border-radius: 50%;
     background: rgba(20,50,140,0.5); border: 0.5px solid rgba(80,130,255,0.25);
-    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    display: flex; align-items: center; justify-content: center;
 }}
-.bubble-ai-content {{ flex: 1; }}
 .bubble-ai {{ color: #c0d8ff; font-size: 14px; line-height: 1.7; }}
-audio {{
-    width: 100%; max-width: 260px; height: 34px; margin-top: 8px; border-radius: 8px;
-    filter: invert(0.85) hue-rotate(195deg) saturate(1.2); outline: none;
-}}
+audio {{ width: 100%; max-width: 260px; height: 34px; margin-top: 8px; filter: invert(0.85) hue-rotate(195deg); }}
 
-/* 优化下拉框与按钮UI以适配底栏 */
-div[data-baseweb="select"] > div {{
-    background: rgba(10,22,60,0.70) !important;
-    border-color: rgba(60,120,255,0.3) !important; border-radius: 9px !important;
-}}
-/* 【修改点】强制下拉框内的文字（包括选中项和箭头）变成白色 */
-div[data-baseweb="select"] span, 
-div[data-baseweb="select"] div {{ 
-    color: #ffffff !important; 
-    font-size: 13px !important; 
-}}
-
-.stButton > button {{
+/* 统一普通按钮样式 */
+.stButton > button[kind="secondary"] {{
     background: rgba(25,65,200,0.85) !important; color: #ffffff !important;
-    border: 0.5px solid rgba(80,140,255,0.4) !important; border-radius: 9px !important;
-    height: 42px !important; font-size: 14px !important; font-weight: 500 !important;
+    border-radius: 9px !important; height: 42px !important; font-size: 14px !important;
 }}
 
-/* 加载动画绝对居中 */
-div[data-testid="stSpinner"] {{
-    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    z-index: 9999; background: rgba(5,13,26,0.9); padding: 25px 40px; 
-    border-radius: 12px; border: 1px solid rgba(60,120,255,0.3);
+/* ======================================================== */
+/* 完成按钮（Primary）锁定右上角 */
+/* ======================================================== */
+button[kind="primary"] {{
+    position: fixed !important;
+    top: 8px !important;
+    right: 16px !important;
+    z-index: 1001 !important;
+    width: auto !important;
+    height: 38px !important;
+    padding: 0 18px !important;
+    font-size: 13px !important;
+    border-radius: 8px !important;
+    background: rgba(30,70,200,0.9) !important;
+    border: 1px solid rgba(80,140,255,0.4) !important;
+    color: #ffffff !important;
+    font-weight: 500 !important;
 }}
-div[data-testid="stSpinner"] span, div[data-testid="stSpinner"] p {{ color: white !important; font-size:15px; }}
+button[kind="primary"]:hover {{
+    background: rgba(40,90,240,1) !important;
+    border-color: rgba(100,160,255,0.6) !important;
+}}
+
+/* ======================================================== */
+/* 【核心修复】：兼容所有浏览器的返回按钮锁定方案 */
+/* 利用 Streamlit tooltip 容器精准定位 */
+/* ======================================================== */
+div[data-testid="stTooltipHoverTarget"] {{
+    position: fixed !important;
+    top: 8px !important;
+    left: 12px !important;
+    z-index: 1001 !important;
+    width: auto !important;
+}}
+div[data-testid="stTooltipHoverTarget"] button {{
+    height: 38px !important;
+    padding: 0 14px !important;
+    font-size: 13px !important;
+    border-radius: 8px !important;
+    background: rgba(20,50,140,0.5) !important;
+    border: 1px solid rgba(80,140,255,0.3) !important;
+    color: #ffffff !important;
+    font-weight: 500 !important;
+    margin: 0 !important;
+}}
+div[data-testid="stTooltipHoverTarget"] button:hover {{
+    background: rgba(40,80,180,0.8) !important;
+}}
 </style>
 """, unsafe_allow_html=True)
 
-# ── Session State ──────────────────────────────────────────
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# ── 顶栏 & Banner 渲染 ────────────────────────────────────
+banner_img = f'<img src="{BANNER_SRC}"/>' if BANNER_SRC else ''
 
-# ================== 页面渲染 ==================
-
-# 1 & 2. 渲染固定的顶栏与 Banner
-banner_html = f'<img src="{BANNER_SRC}"/>' if BANNER_SRC else '<div style="display:flex;height:100%;align-items:center;justify-content:center;color:white;">Banner 未找到</div>'
+# 动态计算左侧位移：如果是第二页，向右移动 80px，为“返回”按钮腾出空间
+header_shift = "80px" if st.session_state.page == 2 else "0px"
 
 st.markdown(f"""
 <div class="fixed-header">
-    <div class="header-icon">🎙️</div>
-    <div>
+    <div style="display:flex; align-items:center; gap:10px; margin-left: {header_shift}; transition: margin-left 0.3s ease;">
+        <div style="background:rgba(30,70,200,0.25); padding:5px; border-radius:6px; border:0.5px solid rgba(80,140,255,0.3);">🎙️</div>
         <div class="header-title">AI 语音交互系统</div>
-        <div class="header-sub">Generative Voice Study</div>
     </div>
 </div>
 <div class="banner-wrap">
-    {banner_html}
+    {banner_img}
     <div class="banner-overlay"></div>
     <div class="banner-label">Generative AI · Voice Analysis</div>
 </div>
 """, unsafe_allow_html=True)
 
-# 3. 渲染居中滚动的对话窗口
-def get_audio_html(audio_bytes):
-    audio_base64 = base64.b64encode(audio_bytes).decode()
-    return f'<audio controls src="data:audio/mp3;base64,{audio_base64}"></audio>'
+# ── 页面路由 ──────────────────────────────────────────────
 
-chat_content = '<div class="chat-scroll-wrap" id="chatWrap">'
-if not st.session_state.messages:
-    chat_content += """
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;opacity:0.4;">
-        <span style="font-size:13px;color:#c0d8ff;">请在底部选择问题发送</span>
-    </div>
-    """
-else:
-    for msg in st.session_state.messages:
-        if msg["role"] == "user":
-            chat_content += f'<div class="bubble-user-wrap"><div class="bubble-user">{msg["content"]}</div></div>'
-        else:
-            audio_tag = get_audio_html(msg["audio"]) if "audio" in msg else ""
-            chat_content += f'''
-            <div class="bubble-ai-wrap">
-                <div class="ai-dot">🎙️</div>
-                <div class="bubble-ai-content">
-                    <div class="bubble-ai">{msg["content"]}</div>
-                    {audio_tag}
-                </div>
-            </div>
-            '''
-# 注入自动滚动到最底部的JS（注意这里不能有缩进）
-chat_content += '''
-<script>
-    var chatWrap = window.parent.document.getElementById('chatWrap');
-    if (chatWrap) { chatWrap.scrollTop = chatWrap.scrollHeight; }
-</script>
+# --- 第一页：实验说明 ---
+if st.session_state.page == 1:
+    st.markdown("""
+<div class="scroll-wrap">
+<div class="instruction-text">
+<p style="font-size: 16px; color: #ffffff;"><b>尊敬的参与者，您好：</b></p>
+<p>非常感谢您参与本次关于“AI 语音特征感知”的学术调研。为确保评价数据真实有效，请在正式开始前，花 1 分钟了解以下流程：</p>
+
+<p style="margin-top: 20px;"><b style="color: #ffffff;">📍 第一步：环境与设备准备</b><br>
+· <b>设备检查：</b> 请确保设备已退出静音模式，并将音量调至适中。<br>
+· <b>环境建议：</b> 建议在安静环境下体验，或佩戴耳机以精准捕捉声音细节。<br>
+· <b>网络保障：</b> 请使用稳定的 Wi-Fi 或 5G 网络，避免音频加载卡顿。</p>
+
+<p style="margin-top: 20px;"><b style="color: #ffffff;">⚠️ 第二步：核心实验要求（非常重要）</b><br>
+进入交互页面后，请严格遵循以下原则：<br>
+· <b>手动播放：</b> AI 生成回答后，请手动点击下方语音条的“播放”按钮。<br>
+· <b>完整听取：</b> 请务必 <span class="highlight-blue">听完整个进度条</span>。实验着重考察声音的微小变化（如停顿、节奏、语音自信度等），漏听或跳听会导致您的直觉判断偏离实际。<br>
+· <b>反复确认：</b> 如果第一遍未听清，您可以重复播放或拖动进度条重听。<br>
+· <b>耐心等待：</b> 语音为大模型实时生成，加载需几秒钟时间，请稍作等待。</p>
+
+<p style="margin-top: 20px;"><b style="color: #ffffff;">📝 第三步：完成问卷</b><br>
+在完成<b style="color: #3b82f6;">至少三轮</b>问题的交互后，请跟随您的<b>第一直觉</b>，点击页面右上角的“完成”按钮，跳转至问卷页面进行最终评分。</p>
+
+<p style="margin-top: 28px; color: #4dabff; text-align: center;">
+<b>感谢您的配合！您的认真反馈对本研究结论至关重要。</b>
+</p>
 </div>
-'''
-st.markdown(chat_content, unsafe_allow_html=True)
+</div>
+""", unsafe_allow_html=True)
 
-
-# 4. 渲染底部操作栏 (原生的Streamlit组件被CSS锁定在底部)
-options = ["请点击选择一个问题进行咨询..."] + list(SPECIFIC_RESPONSES.keys())
-
-col_sel, col_btn = st.columns([3.5, 1], gap="small")
-with col_sel:
-    selected_option = st.selectbox("Q", options, label_visibility="collapsed")
-with col_btn:
-    send_trigger = st.button("发送", use_container_width=True)
-
-# ── 交互逻辑 ──────────────────────────────────
-if send_trigger and selected_option != "请点击选择一个问题进行咨询...":
-    st.session_state.messages.append({"role": "user", "content": selected_option})
-    answer_text = SPECIFIC_RESPONSES[selected_option]
-
-    try:
-        with st.spinner("专家正在思考并生成语音..."):
-            audio_gen = client_el.text_to_speech.convert(
-                voice_id=VOICE_ID,
-                text=answer_text,
-                model_id=MODEL_ID,
-                voice_settings=VoiceSettings(
-                    stability=STABILITY_VAL,
-                    similarity_boost=0.8,
-                    use_speaker_boost=True
-                )
-            )
-            audio_bytes = b"".join(list(audio_gen))
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": answer_text,
-                "audio": audio_bytes
-            })
+    # 底部按钮栏
+    _, col_btn, _ = st.columns([0.1, 0.8, 0.1])
+    with col_btn:
+        if st.button("我已阅读说明，进入实验 (下一页)", use_container_width=True):
+            st.session_state.page = 2
             st.rerun()
-    except Exception as e:
-        st.error(f"语音生成出错: {str(e)}")
+
+# --- 第二页：实验交互 ---
+elif st.session_state.page == 2:
+
+    # ========================================================
+    # 左上角返回按钮 (通过 help 属性触发 tooltip 容器实现绝对定位)
+    # ========================================================
+    if st.button("⬅ 返回", help="返回上一页", key="back_btn"):
+        st.session_state.page = 1
+        st.rerun()
+
+    # ========================================================
+    # 右上角完成按钮 (被 CSS type="primary" 精准锁定)
+    # ========================================================
+    if st.button("完成", type="primary", key="finish_btn"):
+        st.session_state.page = 3
+        st.rerun()
+
+    # 聊天内容渲染（滚动区）
+    chat_html = '<div class="scroll-wrap" id="chatWrap">'
+    if not st.session_state.messages:
+        chat_html += '<div style="display:flex;align-items:center;justify-content:center;height:100%;opacity:0.4;font-size:13px;color:#c0d8ff;">请在底部选择问题发送</div>'
+    else:
+        for msg in st.session_state.messages:
+            if msg["role"] == "user":
+                chat_html += f'<div class="bubble-user-wrap"><div class="bubble-user">{msg["content"]}</div></div>'
+            else:
+                audio_b64 = base64.b64encode(msg["audio"]).decode()
+                chat_html += f'''
+                <div class="bubble-ai-wrap">
+                    <div class="ai-dot">🎙️</div>
+                    <div style="flex:1;">
+                        <div class="bubble-ai">{msg["content"]}</div>
+                        <audio controls src="data:audio/mp3;base64,{audio_b64}"></audio>
+                    </div>
+                </div>'''
+    chat_html += '</div>'
+    st.markdown(chat_html, unsafe_allow_html=True)
+
+    # 底部对话控制器
+    options = ["请点击选择一个问题进行咨询..."] + list(SPECIFIC_RESPONSES.keys())
+    col_sel, col_btn = st.columns([3.5, 1], gap="small")
+    with col_sel:
+        selected = st.selectbox("Q", options, label_visibility="collapsed")
+    with col_btn:
+        send_trigger = st.button("发送", use_container_width=True)
+
+    if send_trigger and selected != "请点击选择一个问题进行咨询...":
+        st.session_state.messages.append({"role": "user", "content": selected})
+        answer = SPECIFIC_RESPONSES[selected]
+        try:
+            with st.spinner(""):
+                audio_gen = client_el.text_to_speech.convert(
+                    voice_id=VOICE_ID, text=answer, model_id=MODEL_ID,
+                    voice_settings=VoiceSettings(stability=STABILITY_VAL, similarity_boost=0.8, use_speaker_boost=True)
+                )
+                st.session_state.messages.append({
+                    "role": "assistant", "content": answer, "audio": b"".join(list(audio_gen))
+                })
+                st.rerun()
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+# --- 第三页：问卷跳转 ---
+elif st.session_state.page == 3:
+    st.markdown(f"""
+    <div class="scroll-wrap">
+        <div style="text-align:center; padding-top:40px;">
+            <p style="font-size:18px; color:white; font-weight:bold;">实验交互已完成</p>
+            <p style="margin:20px 0; color:#c0d8ff;">请点击下方链接进入问卷调查平台：</p>
+            <a href="https://v.wjx.cn/vm/PDMTEYX.aspx# " target="_blank" 
+               style="display:inline-block; background:#1941c8; color:white; padding:12px 30px; 
+                      text-decoration:none; border-radius:8px; font-weight:bold;">
+               进入问卷星填写评分
+            </a>
+            <p style="font-size:12px; color:rgba(180,210,255,0.4); margin-top:40px;">
+                * 提交问卷后即可关闭页面，感谢您的支持！
+            </p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    _, col_back, _ = st.columns([0.2, 0.6, 0.2])
+    with col_back:
+        if st.button("返回查看对话", use_container_width=True):
+            st.session_state.page = 2
+            st.rerun()
