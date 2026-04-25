@@ -103,11 +103,23 @@ header[data-testid="stHeader"] {{ display: none !important; }}
 .bubble-ai {{ color: #c0d8ff; font-size: 14px; line-height: 1.7; }}
 audio {{ width: 100%; max-width: 260px; height: 34px; margin-top: 8px; filter: invert(0.85) hue-rotate(195deg); }}
 
+/* 锁定底部控制器 (对所有页面生效) */
+div[data-testid="stHorizontalBlock"], .fixed-footer-btn {{
+    position: fixed; bottom: 0; left: 0; width: 100%; 
+    height: 105px; padding: 10px 14px 28px 14px;
+    background: rgba(5,12,28,0.98); z-index: 1000;
+    border-top: 0.5px solid rgba(60,120,255,0.2);
+    display: flex; align-items: center; gap: 10px;
+}}
+
 /* 统一普通按钮样式 */
 .stButton > button[kind="secondary"] {{
     background: rgba(25,65,200,0.85) !important; color: #ffffff !important;
     border-radius: 9px !important; height: 42px !important; font-size: 14px !important;
 }}
+
+/* 优化手机端下拉框文字排版 */
+div[data-baseweb="select"] {{ font-size: 14px !important; }}
 
 /* 锁定完成按钮（Primary）到右上角 */
 button[kind="primary"] {{
@@ -116,46 +128,33 @@ button[kind="primary"] {{
     border-radius: 8px !important; background: rgba(30,70,200,0.9) !important;
     border: 1px solid rgba(80,140,255,0.4) !important; color: #ffffff !important; font-weight: 500 !important;
 }}
+
+/* ======================================================== */
+/* 兼容所有浏览器的返回按钮锁定方案 (利用 tooltip 容器) */
+/* ======================================================== */
+div[data-testid="stTooltipHoverTarget"] {{
+    position: fixed !important;
+    top: 8px !important;
+    left: 12px !important;
+    z-index: 1001 !important;
+    width: auto !important;
+}}
+div[data-testid="stTooltipHoverTarget"] button {{
+    height: 38px !important;
+    padding: 0 14px !important;
+    font-size: 13px !important;
+    border-radius: 8px !important;
+    background: rgba(20,50,140,0.5) !important;
+    border: 1px solid rgba(80,140,255,0.3) !important;
+    color: #ffffff !important;
+    font-weight: 500 !important;
+    margin: 0 !important;
+}}
+div[data-testid="stTooltipHoverTarget"] button:hover {{
+    background: rgba(40,80,180,0.8) !important;
+}}
 </style>
 """, unsafe_allow_html=True)
-
-# ── 针对第二页的专属 CSS (完美兼容手机端左上角返回和底部栏) ──
-if st.session_state.page == 2:
-    st.markdown("""
-    <style>
-    /* 第一组 columns (返回按钮) 锁定在左上角 */
-    div[data-testid="stHorizontalBlock"]:first-of-type {
-        position: fixed !important; top: 8px !important; left: 12px !important;
-        z-index: 1001 !important; width: auto !important;
-    }
-    div[data-testid="stHorizontalBlock"]:first-of-type button {
-        height: 38px !important; padding: 0 14px !important; font-size: 13px !important;
-        border-radius: 8px !important; background: rgba(20,50,140,0.5) !important;
-        border: 1px solid rgba(80,140,255,0.3) !important; color: #ffffff !important; font-weight: 500 !important;
-    }
-    /* 最后一组 columns (底部操作栏) 锁定在底部 */
-    div[data-testid="stHorizontalBlock"]:last-of-type {
-        position: fixed; bottom: 0; left: 0; width: 100%; 
-        height: 105px; padding: 10px 14px 28px 14px;
-        background: rgba(5,12,28,0.98); z-index: 1000;
-        border-top: 0.5px solid rgba(60,120,255,0.2); align-items: center;
-    }
-    /* 优化手机端下拉框文字排版 */
-    div[data-baseweb="select"] { font-size: 14px !important; }
-    </style>
-    """, unsafe_allow_html=True)
-elif st.session_state.page == 1:
-    st.markdown("""
-    <style>
-    /* 第一页底部栏锁定 */
-    div[data-testid="stHorizontalBlock"] {
-        position: fixed; bottom: 0; left: 0; width: 100%; 
-        height: 105px; padding: 10px 14px 28px 14px;
-        background: rgba(5,12,28,0.98); z-index: 1000;
-        border-top: 0.5px solid rgba(60,120,255,0.2);
-    }
-    </style>
-    """, unsafe_allow_html=True)
 
 # ── 顶栏 & Banner 渲染 ────────────────────────────────────
 banner_img = f'<img src="{BANNER_SRC}"/>' if BANNER_SRC else ''
@@ -217,15 +216,15 @@ if st.session_state.page == 1:
 elif st.session_state.page == 2:
 
     # ========================================================
-    # 左上角返回按钮 (被 CSS first-of-type 锁定)
+    # 左上角返回按钮 (通过 help 属性触发 tooltip 容器实现绝对定位)
     # ========================================================
-    col_back, _ = st.columns([1, 10])
-    with col_back:
-        if st.button("⬅ 返回", key="back_btn"):
-            st.session_state.page = 1
-            st.rerun()
+    if st.button("⬅ 返回", help="返回上一页", key="back_btn"):
+        st.session_state.page = 1
+        st.rerun()
 
-    # 右上角完成按钮
+    # ========================================================
+    # 右上角完成按钮 (被 CSS type="primary" 精准锁定)
+    # ========================================================
     if st.button("完成", type="primary", key="finish_btn"):
         st.session_state.page = 3
         st.rerun()
@@ -251,9 +250,7 @@ elif st.session_state.page == 2:
     chat_html += '</div>'
     st.markdown(chat_html, unsafe_allow_html=True)
 
-    # ========================================================
-    # 底部对话控制器 (被 CSS last-of-type 锁定)
-    # ========================================================
+    # 底部对话控制器
     options = ["请点击选择一个问题进行咨询..."] + list(SHORT_TO_LONG.keys())
     col_sel, col_btn = st.columns([3.5, 1], gap="small")
     
